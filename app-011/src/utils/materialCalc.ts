@@ -1,6 +1,9 @@
 import type { Room, Opening, MatSpec, MaterialResult } from '../types';
 import { polygonArea, polygonPerimeter } from './geometry';
 
+const isTileMat = (matId: string) => matId.startsWith('tile_');
+const isDoorwayOpening = (opening: Opening) => opening.type !== 'window';
+
 export const DEFAULT_MATS: MatSpec[] = [
   { id: 'paint', name: '乳胶漆', unit: 'm2', coverage: 12, lossRate: 0.05, price: 35 },
   { id: 'primer', name: '底漆', unit: 'm2', coverage: 14, lossRate: 0.05, price: 25 },
@@ -25,49 +28,14 @@ export function calcMaterials(
     const wallArea = perim * room.heightMm;
 
     const roomOpenings = openings.filter((o) => o.roomId === room.id);
-    let windowArea = 0;
-    let doorArea = 0;
-    for (const other of rooms) {
-      const otherOpenings = openings.filter((o) => o.roomId === other.id);
-      for (const o of otherOpenings) {
-        if (o.type === 'window') {
-          windowArea += o.widthMm * o.heightMm;
-        }
-        if (o.type === 'door') {
-          doorArea += o.heightMm * o.widthMm;
-        }
-        if (o.type === 'sliding') {
-          doorArea += o.heightMm * o.widthMm;
-        }
-      }
-    }
-    const openingArea = windowArea - doorArea;
-    const doorsOnWall = (roomId: string, wallIndex: number) =>
-      openings.filter(
-        (o) =>
-          o.roomId === roomId &&
-          o.wallIndex === wallIndex &&
-          (o.type === 'door' || o.type === 'sliding')
-      );
-    let doorWidth = 0;
-    for (const other of rooms) {
-      for (let wi = 0; wi < other.polygon.length; wi++) {
-        const onWall = doorsOnWall(other.id, wi);
-        for (const od of onWall) {
-          const samePlace = roomOpenings.some(
-            (o) => o.wallIndex === od.wallIndex && o.offsetMm === od.offsetMm
-          );
-          if (samePlace) {
-            doorWidth += od.widthMm;
-          }
-        }
-      }
-    }
-    for (const o of roomOpenings) {
-      if (o.type === 'door' || o.type === 'sliding') {
-        doorWidth += o.widthMm;
-      }
-    }
+    const openingArea = roomOpenings.reduce(
+      (sum, opening) => sum + opening.widthMm * opening.heightMm,
+      0
+    );
+    const doorWidth = roomOpenings
+      .filter(isDoorwayOpening)
+      .reduce((sum, opening) => sum + opening.widthMm, 0);
+    const needsSkirting = !isTileMat(room.wallMat) || !isTileMat(room.floorMat);
 
     const netWallArea = Math.max(0, wallArea - openingArea);
     const netSkirtingLen = Math.max(0, perim - doorWidth);
@@ -109,8 +77,8 @@ export function calcMaterials(
       });
     }
 
-    // Skirting (if not tile wall)
-    if (room.wallMat === 'paint' || room.wallMat === 'wallpaper' || room.wallMat !== 'tile_300') {
+    // 墙面和地面都铺砖时，不再单独配踢脚线；其余房间按扣门洞后的延长米计算。
+    if (needsSkirting) {
       const skMat = matMap.get('skirting');
       if (skMat) {
         const qty = netSkirtingLen * (1 + skMat.lossRate);
