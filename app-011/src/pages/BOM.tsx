@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useStore } from '../store';
-import { calcMaterials, calcPaintBuckets } from '../utils/materialCalc';
+import { calcMaterials } from '../utils/materialCalc';
 import { polygonPerimeter } from '../utils/geometry';
 import type { MatSpec } from '../types';
 

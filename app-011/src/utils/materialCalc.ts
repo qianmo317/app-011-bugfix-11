@@ -24,53 +24,24 @@ export function calcMaterials(
     const perim = polygonPerimeter(room.polygon);
     const wallArea = perim * room.heightMm;
 
+    // 只按本房间自己登记的洞口计算，避免与相邻房间重复扣减
     const roomOpenings = openings.filter((o) => o.roomId === room.id);
-    let windowArea = 0;
-    let doorArea = 0;
-    for (const other of rooms) {
-      const otherOpenings = openings.filter((o) => o.roomId === other.id);
-      for (const o of otherOpenings) {
-        if (o.type === 'window') {
-          windowArea += o.widthMm * o.heightMm;
-        }
-        if (o.type === 'door') {
-          doorArea += o.heightMm * o.widthMm;
-        }
-        if (o.type === 'sliding') {
-          doorArea += o.heightMm * o.widthMm;
-        }
-      }
-    }
-    const openingArea = windowArea - doorArea;
-    const doorsOnWall = (roomId: string, wallIndex: number) =>
-      openings.filter(
-        (o) =>
-          o.roomId === roomId &&
-          o.wallIndex === wallIndex &&
-          (o.type === 'door' || o.type === 'sliding')
-      );
-    let doorWidth = 0;
-    for (const other of rooms) {
-      for (let wi = 0; wi < other.polygon.length; wi++) {
-        const onWall = doorsOnWall(other.id, wi);
-        for (const od of onWall) {
-          const samePlace = roomOpenings.some(
-            (o) => o.wallIndex === od.wallIndex && o.offsetMm === od.offsetMm
-          );
-          if (samePlace) {
-            doorWidth += od.widthMm;
-          }
-        }
-      }
-    }
-    for (const o of roomOpenings) {
-      if (o.type === 'door' || o.type === 'sliding') {
-        doorWidth += o.widthMm;
-      }
-    }
+    const isDoorLike = (o: Opening) => o.type === 'door' || o.type === 'sliding';
+
+    // 门窗面积：窗、门均为扣减项，只扣一次
+    const openingArea = roomOpenings.reduce(
+      (sum, o) => sum + o.widthMm * o.heightMm,
+      0
+    );
+
+    // 踢脚线扣门洞：只扣本房间自己的门洞，共用墙两侧各自登记互不影响
+    const doorWidth = roomOpenings
+      .filter(isDoorLike)
+      .reduce((sum, o) => sum + o.widthMm, 0);
 
     const netWallArea = Math.max(0, wallArea - openingArea);
     const netSkirtingLen = Math.max(0, perim - doorWidth);
+    const wallTiled = room.wallMat === 'tile_300';
 
     // Floor
     const floorMat = matMap.get(room.floorMat);
@@ -94,11 +65,15 @@ export function calcMaterials(
       });
     }
 
-    // Wall paint or wallpaper
+    // Wall paint, wallpaper or tile
     const wallMat = matMap.get(room.wallMat);
     if (wallMat) {
       const qty = netWallArea * (1 + wallMat.lossRate);
-      const detail = `房间"${room.name}"墙面: (${perim.toFixed(0)}mm×${room.heightMm}mm - ${openingArea.toFixed(0)}mm²) × (1+${(wallMat.lossRate * 100).toFixed(0)}%) = ${qty.toFixed(2)}${wallMat.unit}`;
+      let detail = `房间"${room.name}"墙面: (${perim.toFixed(0)}mm×${room.heightMm}mm - ${openingArea.toFixed(0)}mm²) × (1+${(wallMat.lossRate * 100).toFixed(0)}%) = ${qty.toFixed(2)}${wallMat.unit}`;
+      // 四面贴砖的房间：踢脚线由同色瓷砖裁切代替，并入墙砖，不再另配踢脚线
+      if (wallTiled) {
+        detail += `；踢脚处由墙砖代替：(${perim.toFixed(0)} - ${doorWidth.toFixed(0)})mm = ${netSkirtingLen.toFixed(0)}mm`;
+      }
       results.push({
         matId: wallMat.id,
         name: wallMat.name,
@@ -109,8 +84,8 @@ export function calcMaterials(
       });
     }
 
-    // Skirting (if not tile wall)
-    if (room.wallMat === 'paint' || room.wallMat === 'wallpaper' || room.wallMat !== 'tile_300') {
+    // Skirting：仅非贴砖墙面另配踢脚线；门洞只扣本房间登记的一次
+    if (!wallTiled) {
       const skMat = matMap.get('skirting');
       if (skMat) {
         const qty = netSkirtingLen * (1 + skMat.lossRate);
