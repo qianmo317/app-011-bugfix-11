@@ -1,0 +1,9 @@
+services:
+  app-011:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8191:80"
+    restart: unless-stopped
+    container_name: app-011-bugfix-11
